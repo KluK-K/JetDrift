@@ -1,2 +1,3 @@
 # JetDrift
-Jet drift research code on Bayesian expansion based on jet axis and Fourier index
+very very seperate version
+update on 21/05/2025
