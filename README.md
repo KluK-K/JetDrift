@@ -3,5 +3,5 @@ A concise toolkit for studying jet drift and Fourier-v₁ unfolding in high-ener
 
 - Build and combine response matrices (8×32 → 5×32 bins)  
 - Perform Bayes and SVD unfolding with RooUnfold  
-- Analyze jet angle distributions (WTA vs. SOP axes)  
+- Analyze jet angle distributions (WTA vs. SOP axis)  
 - Compute covariance matrices and visualize results  
