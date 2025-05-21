@@ -1,0 +1,34 @@
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1D.h>
+
+void WTA_Make_V1_AllJets(const char* outname="WTA_V1_AllJets_Binned.root")
+{
+    TFile* f = TFile::Open("JetFourierAnalysis_WTA11_09_withHungarian.root", "READ");
+    if (!f || f->IsZombie()) {
+        std::cerr << "Cannot open source data file!\n"; return;
+    }
+
+    TTree* tData = (TTree*) f->Get("all_particle_data");
+    if (!tData) {
+        std::cerr << "Missing tree: all_particle_data\n"; return;
+    }
+
+    Float_t v1;
+    tData->SetBranchAddress("fourierV1", &v1);
+
+    const int nbins = 24;
+    const double xmin = -0.2, xmax = 1.0;
+    auto* hData = new TH1D("hV1_DataAll", "Collision Data V1;V1;Entries", nbins, xmin, xmax);
+
+    for (Long64_t i=0,n=tData->GetEntries(); i<n; ++i){
+        tData->GetEntry(i);
+        hData->Fill(v1);
+    }
+
+    TFile* fout = TFile::Open(outname, "RECREATE");
+    hData->Write();
+    fout->Close();
+    std::cout << "[OK] wrote → " << outname << "\n";
+}
+

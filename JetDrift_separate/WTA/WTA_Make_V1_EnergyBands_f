@@ -1,0 +1,54 @@
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1D.h>
+#include <iostream>
+#include <memory>
+
+void WTA_Make_V1_EnergyBands_f(
+  const char* inFile  ="JetFourierAnalysis_WTA11_09_withHungarian.root",
+  const char* outRoot ="WTA_V1_EnergyBands.root",
+  const char* treeName="all_particle_data"
+){
+    constexpr int    NSLICE   = 8; 
+    constexpr double ELO[NSLICE]={10,20,30,35,40,45,50,60};
+    constexpr double EHI[NSLICE]={20,30,35,40,45,50,60,100};
+
+    constexpr int    NBIN_V1  = 32;
+    constexpr double V1_MIN   = 0.0;
+    constexpr double V1_MAX   = 1.0;
+
+    constexpr int NBIN_TOT = NSLICE*NBIN_V1;  // 8×32 = 256
+    TH1D* hCombo = new TH1D("hV1_EnergyBands",
+        "Reco V_{1} (8 energy slices);global bin ID;Entries",
+        NBIN_TOT, 0.0, NBIN_TOT);             // ★ upper 256
+
+    std::unique_ptr<TFile> fin(TFile::Open(inFile,"READ"));
+    if(!fin||fin->IsZombie()){std::cerr<<"[ERR] open "<<inFile<<"\n";return;}
+    auto* t = (TTree*)fin->Get(treeName);
+    if(!t){ std::cerr<<"[ERR] no "<<treeName<<"\n"; return;}
+
+    Float_t v1,E;
+    t->SetBranchAddress("fourierV1",&v1);
+    t->SetBranchAddress("jetEnergy",&E);
+
+    const Long64_t N = t->GetEntries();
+    for(Long64_t i=0;i<N;++i){
+        t->GetEntry(i);
+        if(v1<V1_MIN||v1>=V1_MAX) continue;
+
+        int slice=-1;
+        for(int s=0;s<NSLICE;++s)
+            if(E>=ELO[s]&&E<EHI[s]){ slice=s; break; }
+        if(slice<0) continue;
+
+        int v1bin = int( (v1-V1_MIN)/(V1_MAX-V1_MIN) * NBIN_V1 ); // 0-31
+        int global = slice*NBIN_V1 + v1bin;                       // 0-255
+        hCombo->Fill(global);
+    }
+
+    std::unique_ptr<TFile> fout(TFile::Open(outRoot,"RECREATE"));
+    hCombo->Write();
+    fout->Close();
+    std::cout<<"[OK] "<<outRoot<<" : 256-bin histogram ready\n";
+}
+

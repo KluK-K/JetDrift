@@ -1,0 +1,136 @@
+
+#include <TFile.h>
+#include <TCanvas.h>
+#include <TKey.h>
+#include <TCollection.h>
+#include <TPad.h>
+#include <TH2D.h>
+#include <TH1F.h>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <string>
+
+static void CollectHists(TPad* pad, std::map<std::string,TObject*>& out)
+{
+    if(!pad) return;
+    TIter it(pad->GetListOfPrimitives());
+    while(TObject* o = it()){
+        if(o->InheritsFrom(TH1::Class()))       out[o->GetName()] = o;
+        else if(o->InheritsFrom(TPad::Class())) CollectHists((TPad*)o, out);
+    }
+}
+
+void Combine_V1_Matrix_WTA_SOPcut_v5(
+        const char* inFile  = "Matrix_V1_t_vs_tgen_EnergyBinned_WithUnmatchedBars_WTA_V1_SOPcut.root",
+        const char* outFile = "Combined_V1_Matrix_WTA_SOPcut_v5.root")
+{
+    constexpr int NR = 8;
+    constexpr int NC = 5; 
+
+    constexpr int IX_FIRST = 7; 
+    constexpr int IX_LAST  = 38;
+    constexpr int NB2_DST  = IX_LAST - IX_FIRST + 1; 
+
+    constexpr int NB1_DST = 20;         // unmatched bar 5..24
+    constexpr int NLEFT   = NR * NB1_DST;
+    constexpr int NBOTTOM = NC * NB1_DST;
+
+    constexpr int NX2 = NR * NB2_DST;   // 256
+    constexpr int NY2 = NC * NB2_DST;   // 160
+    constexpr int NX2_INV = NY2;        // 160  (truth  32)
+    constexpr int NY2_INV = NX2;        // 256  (reco   32)
+    /*------------------------------------------*/
+
+    std::unique_ptr<TFile> fin(TFile::Open(inFile,"READ"));
+
+    std::map<std::string,TObject*> hmap;
+    for(auto* kObj : *fin->GetListOfKeys()){
+        auto* k = (TKey*)kObj;
+        if(k->ReadObj()->InheritsFrom(TH1::Class()))
+            hmap[k->GetName()] = k->ReadObj();
+    }
+    if(hmap.empty()){
+        TCanvas* can=nullptr; fin->GetObject("can",can);
+        if(!can){
+            for(auto* kObj : *fin->GetListOfKeys()){
+                if(std::string(((TKey*)kObj)->GetClassName())=="TCanvas"){
+                    can=(TCanvas*)((TKey*)kObj)->ReadObj(); break;
+                }
+            }
+        }
+        CollectHists(can,hmap);
+    }
+
+    auto get2D=[&](int r,int c)->TH2D*{
+        auto it=hmap.find(Form("hM_%d_%d",r,c));
+        return it==hmap.end()? nullptr: (TH2D*)it->second;};
+
+    auto getRec=[&](int r)->TH1F*{
+        auto it=hmap.find(Form("hRec_%d",r));
+        return it==hmap.end()? nullptr: (TH1F*)it->second;};
+
+    auto getGen=[&](int c)->TH1F*{
+        auto it=hmap.find(Form("hGen_%d",c));
+        return it==hmap.end()? nullptr: (TH1F*)it->second;};
+
+    TH2D* bigC = new TH2D("hBigCentral",
+        "Combined V_{1}(t) vs V_{1}(t_{gen});seg+V_{1}(t);seg+V_{1}(t_{gen})",
+        NX2,0.,(double)NX2, NY2,0.,(double)NY2);
+
+    TH2D* bigC_inv = new TH2D("hBigCentral_inv",
+        "Combined V_{1}(t_{gen}) vs V_{1}(t);seg+V_{1}(t_{gen});seg+V_{1}(t)",
+        NX2_INV,0.,(double)NX2_INV, NY2_INV,0.,(double)NY2_INV);
+
+    TH1F* bigL = new TH1F("hBigLeft",
+        "Reco unmatched;seg+V_{1}(t);entries",
+        NLEFT,0.,(double)NLEFT);
+
+    TH1F* bigB = new TH1F("hBigBottom",
+        "Gen  unmatched;seg+V_{1}(t_{gen});entries",
+        NBOTTOM,0.,(double)NBOTTOM);
+
+    for(int ir=0; ir<NR; ++ir){          // row-reco
+        for(int ic=0; ic<NC; ++ic){      // col-truth
+            TH2D* hs=get2D(ir,ic); if(!hs) continue;
+
+            for(int dx=0; dx<NB2_DST; ++dx){
+                int ix = IX_FIRST + dx;
+                for(int dy=0; dy<NB2_DST; ++dy){
+                    int iy = IX_FIRST + dy;
+                    double v = hs->GetBinContent(ix,iy);
+                    if(v==0.) continue;
+
+                    int gx  = ir*NB2_DST + dx + 1;          
+                    int gy  = ic*NB2_DST + dy + 1;
+                    bigC->AddBinContent(bigC->GetBin(gx,gy), v);
+
+
+                    int gx_i = ic*NB2_DST + dy + 1;     
+                    int gy_i = ir*NB2_DST + dx + 1;  
+                    bigC_inv->AddBinContent(bigC_inv->GetBin(gx_i,gy_i), v);
+                }
+            }
+        }
+    }
+
+    for(int ir=0; ir<NR; ++ir){
+        if(auto* h=getRec(ir))
+            for(int b=5; b<=24; ++b)
+                bigL->SetBinContent(ir*NB1_DST+(b-4), h->GetBinContent(b));
+    }
+    for(int ic=0; ic<NC; ++ic){
+        if(auto* h=getGen(ic))
+            for(int b=5; b<=24; ++b)
+                bigB->SetBinContent(ic*NB1_DST+(b-4), h->GetBinContent(b));
+    }
+
+    std::unique_ptr<TFile> fout(TFile::Open(outFile,"RECREATE"));
+    bigC->Write();
+    bigC_inv->Write();     
+    bigL->Write();
+    bigB->Write();
+    fout->Close();
+
+    std::cout << "[OK] → " << outFile << '\n';
+}
