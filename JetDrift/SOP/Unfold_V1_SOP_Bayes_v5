@@ -1,0 +1,68 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TH2D.h>
+#include <TMatrixD.h>
+#include <memory>
+#include <iostream>
+#include "RooUnfoldResponse.h"
+#include "RooUnfoldBayes.h"
+
+void Unfold_V1_SOP_Bayes_v5(
+    const char* respFile = "Combined_V1_Matrix_SOP_SOPcut_v5.root",
+    const char* dataFile = "SOP_V1_EnergyBands.root",
+    const int   nIter    = 4)
+{
+
+    std::unique_ptr<TFile> fResp(TFile::Open(respFile,"READ"));
+    if(!fResp || fResp->IsZombie()){
+        std::cerr<<"[ERR] cannot open "<<respFile<<"\n"; return;
+    }
+    auto* hResp2D = dynamic_cast<TH2D*>(fResp->Get("hBigCentral"));
+    if(!hResp2D){
+        std::cerr<<"[ERR] no hBigCentral in "<<respFile<<"\n"; return;
+    }
+
+    TH1* hRecoTrain = hResp2D->ProjectionX("hRecoTrain");
+    TH1* hGenTrain  = hResp2D->ProjectionY("hGenTrain");
+
+
+    std::unique_ptr<TFile> fData(TFile::Open(dataFile,"READ"));
+    if(!fData || fData->IsZombie()){
+        std::cerr<<"[ERR] cannot open "<<dataFile<<"\n"; return;
+    }
+    auto* hData256 = dynamic_cast<TH1D*>(fData->Get("hV1_EnergyBands"));
+    if(!hData256){
+        std::cerr<<"[ERR] no hV1_EnergyBands in "<<dataFile<<"\n"; return;
+    }
+
+    TH1D* hDataMap = (TH1D*)hRecoTrain->Clone("hDataMapped");
+    hDataMap->Reset();
+    for(int ib=1; ib<=hData256->GetNbinsX(); ++ib){
+        const double x  = hData256->GetBinCenter(ib);
+        const int    j  = hDataMap->FindBin(x);
+        const double c  = hData256->GetBinContent(ib);
+        const double e  = hData256->GetBinError  (ib);
+
+        hDataMap->AddBinContent(j,c);
+        double oldE = hDataMap->GetBinError(j);
+        hDataMap->SetBinError(j,std::sqrt(oldE*oldE+e*e));
+    }
+    std::cout<<"[INFO] data 256 bins → mapped to "<<hDataMap->GetNbinsX()
+             <<" reco-bins\n";
+
+    RooUnfoldResponse resp(hRecoTrain,hGenTrain,hResp2D);
+    RooUnfoldBayes    unfold(&resp,hDataMap,nIter);
+
+    TH1*     hTruth160 = unfold.Hunfold();                             // 160 bin
+    TMatrixD cov160    = unfold.Eunfold(RooUnfolding::kCovariance);    // 160×160
+
+    std::unique_ptr<TFile> fout(TFile::Open("SOP_V1_EB_Unfolded_v5.root",
+                                            "RECREATE"));
+    hDataMap ->Write("hDataMap");
+    hTruth160->Write("Truth_160bin");
+    cov160   .Write("Cov_160x160");
+    fout->Close();
+
+    std::cout<<"[OK] unfolded spectrum saved → SOP_V1_EB_Unfolded_v5.root\n";
+}
+
