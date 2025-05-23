@@ -25,7 +25,7 @@ static alephTrkEfficiency efficiencyCorrector;
 // constants
 //----------------------------------------------
 static const double kJetConeR      = 0.4;                 // cone R
-static const double kMatchAngleCut = 0.2 * TMath::Pi();   // 0.2π
+static const double kMatchAngleCut = 0.2;   // 0.2
 
 //======================================================================
 // (pt,eta,phi) → (px,py,pz)
