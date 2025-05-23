@@ -601,7 +601,7 @@ void AnalyzeJetAngleDist_Core(bool useSOP=true)
 
 void AnalyzeJetAngleDist_WithHungarian()
 {
-    std::cout << "\n✧ Use SOP jet axis? (y/n) [y] : " << std::flush;
+    std::cout << "\n Use SOP jet axis? (y/n) [y] : " << std::flush;
     std::string ans; std::getline(std::cin, ans);
     bool useSOP = true;
     if(!ans.empty() &&
