@@ -1,0 +1,95 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TMatrixDSym.h>
+#include <TMatrixDSymEigen.h>
+#include <TGraph.h>
+#include <TCanvas.h>
+#include <TStyle.h>
+#include <TLatex.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+void Unfold_V1_Bayes_IterQuality(
+    const char* inFile = "V1_EB_Cov_Analysis.root",
+    const int   maxIter=40)
+{
+    std::unique_ptr<TFile> fin(TFile::Open(inFile,"READ"));
+    const int NBIN = 160;
+    std::vector<double> totVar(maxIter+1,0.0);
+    std::vector<double> meanDelta(maxIter+1,0.0);
+    std::vector<double> condNum(maxIter+1,0.0);
+    TH1D* prevTruth = nullptr;
+    for(int iter=1; iter<=maxIter; ++iter){
+        auto* hErr = dynamic_cast<TH1D*>(fin->Get(Form("hErr_iter%d",iter)));
+        double sumVar=0;
+        for(int b=1;b<=NBIN;++b){
+            const double sig = hErr->GetBinContent(b);
+            sumVar += sig*sig;
+        }
+        totVar[iter]=sumVar;
+        auto* hTruth = dynamic_cast<TH1D*>(fin->Get(Form("Truth_160bin_iter%d",iter)));
+        if(hTruth && prevTruth){
+            double sum=0;
+            for(int b=1;b<=NBIN;++b){
+                sum += std::fabs(hTruth->GetBinContent(b)-prevTruth->GetBinContent(b));
+            }
+            meanDelta[iter]=sum/NBIN;
+        }
+        prevTruth = hTruth;
+        auto* cov = dynamic_cast<TMatrixD*>(fin->Get(Form("Cov_160x160_iter%d",iter)));
+        if(cov){
+            TMatrixDSym sym(NBIN);
+            for(int i=0;i<NBIN;++i)
+              for(int j=0;j<NBIN;++j) sym(i,j)=(*cov)(i,j);
+
+            TMatrixDSymEigen eig(sym);
+            const TVectorD& ev=eig.GetEigenValues();
+            double lmax = ev(0), lmin = ev(0);
+            for(int k=1;k<NBIN;++k){
+                lmax = std::max(lmax, ev(k));
+                if(ev(k)>0) lmin = std::min(lmin, ev(k));
+            }
+            condNum[iter] = (lmin>0)? lmax/lmin : 0;
+        }
+    }
+    auto* gVar   = new TGraph(maxIter);
+    auto* gDelta = new TGraph(maxIter-1);
+    auto* gCond  = new TGraph(maxIter);
+    for(int i=1;i<=maxIter;++i){
+        gVar ->SetPoint(i-1,i,totVar[i]);
+        gCond->SetPoint(i-1,i,condNum[i]);
+        if(i>1) gDelta->SetPoint(i-2,i,meanDelta[i]);
+    }
+    gVar ->SetName("gTotalVariance");
+    gDelta->SetName("gMeanDeltaTruth");
+    gCond->SetName("gConditionNumber");
+    gVar ->SetTitle("Total variance vs iteration;#it{n}_{iter};#Sigma #sigma^{2}");
+    gDelta->SetTitle("Mean |#Delta Truth| vs iteration;#it{n}_{iter};<#Delta V_{1}>");
+    gCond->SetTitle("Covariance condition number;#it{n}_{iter};#lambda_{max}/#lambda_{min}");
+    gVar ->SetLineWidth(2);   gVar ->SetMarkerStyle(20);
+    gDelta->SetLineWidth(2); gDelta->SetMarkerStyle(21);
+    gCond->SetLineWidth(2);  gCond->SetMarkerStyle(22);
+    gStyle->SetOptStat(0);
+    auto* cQual = new TCanvas("cQual","Iteration quality metrics",1800,600);
+    cQual->Divide(3,1);
+    cQual->cd(1); gPad->SetLogy(); gVar ->Draw("APL");
+    cQual->cd(2); gDelta->Draw("APL");
+    cQual->cd(3); gPad->SetLogy(); gCond->Draw("APL");
+    int bestVarIter=1, bestDeltaIter=2;
+    for(int i=2;i<=maxIter;++i)
+        if(totVar[i]<totVar[bestVarIter]) bestVarIter=i;
+    for(int i=3;i<=maxIter;++i)
+        if(meanDelta[i]<meanDelta[bestDeltaIter]) bestDeltaIter=i;
+
+    cQual->cd(1);
+    TLatex lat; lat.SetTextSize(0.04);
+    lat.DrawLatex(0.15,0.15,Form("Min @ %d",bestVarIter));
+    cQual->cd(2);
+    lat.DrawLatex(0.15,0.85,Form("Min @ %d",bestDeltaIter));
+    std::unique_ptr<TFile> fout(TFile::Open("WTA_V1_EB_IterQuality.root","RECREATE"));
+    gVar ->Write(); gDelta->Write(); gCond->Write(); cQual->Write();
+    fout->Close();
+    std::cout<<"V1_EB_IterQuality.root\n";
+}
+

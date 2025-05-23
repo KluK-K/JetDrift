@@ -1,0 +1,131 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TH2D.h>
+#include <TGraph.h>
+#include <TCanvas.h>
+#include <TStyle.h>
+#include <TMatrixD.h>
+#include <TMatrixDSym.h>
+#include <TMatrixDSymEigen.h>
+#include <memory>
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include "RooUnfoldResponse.h"
+#include "RooUnfoldBayes.h"
+
+void UnfoldAndAnalyze_V1_Bayes_AllIter(
+    const char* respFile = "Combined_V1_Matrix_SOPcut_v5.root",
+    const char* dataFile = "V1_EnergyBands.root",
+    const int   maxIter  = 40
+){
+    gStyle->SetOptStat(0);
+    gStyle->SetPalette(kBird);
+
+    std::unique_ptr<TFile> fResp(TFile::Open(respFile,"READ"));
+    auto* hResp2D = dynamic_cast<TH2D*>(fResp->Get("hBigCentral"));
+    TH1* hRecoTrain = hResp2D->ProjectionX("hRecoTrain");  // 256 bin
+    TH1* hGenTrain  = hResp2D->ProjectionY("hGenTrain");   // 160 bin
+
+    std::unique_ptr<TFile> fData(TFile::Open(dataFile,"READ"));
+    auto* hData256 = dynamic_cast<TH1D*>(fData->Get("hV1_EnergyBands"));
+    TH1D* hDataMap = (TH1D*)hRecoTrain->Clone("hDataMap");
+    hDataMap->Reset();
+    for(int ib=1; ib<=hData256->GetNbinsX(); ++ib){
+        const double x  = hData256->GetBinCenter(ib);
+        const int    j  = hDataMap->FindBin(x);
+        const double c  = hData256->GetBinContent(ib);
+        const double e  = hData256->GetBinError  (ib);
+        hDataMap->AddBinContent(j,c);
+        double oldE = hDataMap->GetBinError(j);
+        hDataMap->SetBinError(j,std::sqrt(oldE*oldE+e*e));
+    }
+
+	 RooUnfoldResponse resp(hRecoTrain,hGenTrain,hResp2D);
+    const int nRows = 5, nCols = 8;
+    TCanvas* cAllCorr = new TCanvas("cAllCorr",
+        "Correlation matrices vs iteration", 2200, 1400);
+    cAllCorr->Divide(nCols,nRows);
+    std::unique_ptr<TFile> fout(TFile::Open("WTA_V1_EB_Cov_Analysis.root",
+                                            "RECREATE"));
+    hDataMap->Write();
+
+    constexpr int NSLICE = 5, NBINPS = 32;
+    constexpr int NBIN   = NSLICE*NBINPS;     // 160
+    std::vector<double> sigma(NBIN);
+
+    for(int iter=1; iter<=maxIter; ++iter){
+        RooUnfoldBayes unfold(&resp,hDataMap,iter);
+        TH1* hTruth = unfold.Hunfold();                       // 160 bin
+        hTruth->SetName(Form("Truth_160bin_iter%d",iter));
+
+        TMatrixD cov = unfold.Eunfold(RooUnfolding::kCovariance); // 160×160
+        TH1D* hErr = new TH1D(Form("hErr_iter%d",iter),
+            Form("1#sigma error (iter=%d);global unfolded bin ID;#sigma(V_{1})",iter),
+            NBIN, 0, NBIN);
+
+        for(int i=0;i<NBIN;++i){
+            sigma[i]=std::sqrt(cov(i,i));
+            hErr->SetBinContent(i+1,sigma[i]);
+        }
+
+        TH2D* hCorr = new TH2D(Form("hCorr_iter%d",iter),
+            Form("#rho_{ij} (iter=%d);unfolded bin i;unfolded bin j",iter),
+            NBIN,0,NBIN, NBIN,0,NBIN);
+
+        for(int i=0;i<NBIN;++i)
+          for(int j=0;j<NBIN;++j){
+              const double d=sigma[i]*sigma[j];
+              hCorr->SetBinContent(i+1,j+1,(d>0)?cov(i,j)/d:0.);
+          }
+
+        TH2D* hSlice = new TH2D(Form("hSliceCorr_iter%d",iter),
+            Form("slice #rho (iter=%d);slice #beta;slice #alpha",iter),
+            NSLICE,0,NSLICE, NSLICE,0,NSLICE);
+
+        for(int a=0;a<NSLICE;++a)
+          for(int b=0;b<NSLICE;++b){
+              double sum=0,n=0;
+              for(int ia=0; ia<NBINPS; ++ia){
+                  int i=a*NBINPS+ia;
+                  for(int ib=0; ib<NBINPS; ++ib){
+                      int j=b*NBINPS+ib;
+                      const double d=sigma[i]*sigma[j];
+                      if(d==0) continue;
+                      sum+=cov(i,j)/d; ++n;
+                  }
+              }
+              if(n>0) hSlice->SetBinContent(b+1,a+1,sum/n);
+          }
+
+        TMatrixDSym sym(NBIN);
+        for(int i=0;i<NBIN;++i)
+          for(int j=0;j<NBIN;++j) sym(i,j)=cov(i,j);
+
+        TMatrixDSymEigen eig(sym);
+        const TVectorD& ev=eig.GetEigenValues();
+        TGraph* gEig=new TGraph(NBIN);
+        for(int k=0;k<NBIN;++k) gEig->SetPoint(k,k+1,ev[k]);
+        gEig->SetName(Form("gEigen_iter%d",iter));
+        gEig->SetTitle(Form("Eigenvalue spectrum (iter=%d);index;#lambda",iter));
+
+        hTruth->Write();
+        cov.Write(Form("Cov_160x160_iter%d",iter));
+        hErr->Write(); hSlice->Write(); gEig->Write(); hCorr->Write();
+
+        const int pad = iter;              // 1…40
+        if(pad <= nRows*nCols){
+            cAllCorr->cd(pad);
+            hCorr->GetZaxis()->SetRangeUser(-1,1);
+            hCorr->Draw("colz");
+            gPad->SetRightMargin(0.15);
+            TLatex lat; lat.SetNDC(); lat.SetTextSize(0.08);
+            lat.DrawLatex(0.03,0.92,Form("iter %d",iter));
+        }
+    }
+    cAllCorr->Write();
+    fout->Close();
+
+    std::cout<<"WTA_V1_EB_Cov_Analysis.root\n";
+}
+

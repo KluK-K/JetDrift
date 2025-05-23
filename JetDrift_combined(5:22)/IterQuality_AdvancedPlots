@@ -1,0 +1,76 @@
+#include <TFile.h>
+#include <TGraph.h>
+#include <TCanvas.h>
+#include <TStyle.h>
+#include <TMatrixD.h>
+#include <TLatex.h>
+#include <cmath>
+#include <vector>
+#include <iostream>
+
+double calcChi2(const TH1* truth, const TMatrixD& cov){
+    const int N = truth->GetNbinsX();
+    double chi2=0;
+    for(int i=1;i<=N;++i){
+        double v = truth->GetBinContent(i);
+        double var = cov(i-1,i-1);
+        if(var>0) chi2 += v*v/var;
+    }
+    return chi2;
+}
+
+void IterQuality_AdvancedPlots(const char* qualFile="WTA_V1_EB_IterQuality.root",
+                               const char* iterFile="WTA_V1_EB_Cov_Analysis.root",
+                               int maxIter=40, bool doClosure=false)
+{
+    auto fq = TFile::Open(qualFile);
+    if(!fq){ std::cerr<<"! cannot open "<<qualFile<<"\n"; return; }
+    auto gVar   = (TGraph*)fq->Get("gTotalVariance");
+    auto gDelta = (TGraph*)fq->Get("gMeanDeltaTruth");
+
+    std::vector<double> var(maxIter+1), del(maxIter+1);
+    for(int i=1;i<=maxIter;++i){
+        var[i] = gVar  ->Eval(i);
+        del[i] = gDelta->Eval(i);
+    }
+
+    // L-curve 
+    auto gL = new TGraph(maxIter-1);
+    for(int i=1;i<=maxIter;++i)
+        if(del[i]>0) gL->SetPoint(i-1, std::log(del[i]), std::log(var[i]));
+    gL->SetTitle("L-curve;log <#Delta V_{1}>;log #Sigma #sigma^{2}");
+    gL->SetMarkerStyle(20); gL->SetLineWidth(2);
+    auto gFOM = new TGraph(maxIter-1);
+    for(int i=1;i<=maxIter;++i)
+        gFOM->SetPoint(i-1,i, var[i]*del[i]);
+    gFOM->SetTitle("FOM = #Sigma #sigma^{2} #times <#Delta V_{1}>;n_{iter};F");
+    auto fIter = TFile::Open(iterFile);
+    TGraph* gChi=nullptr;
+    if(doClosure && fIter){
+        const int Nbin=160;
+        gChi = new TGraph(maxIter-1);
+        for(int it=1; it<=maxIter; ++it){
+            auto* hTruth = (TH1*)fIter->Get(Form("Truth_160bin_iter%d",it));
+            auto* covMat = (TMatrixD*)fIter->Get(Form("Cov_160x160_iter%d",it));
+            if(!hTruth||!covMat) continue;
+            double chi2 = calcChi2(hTruth,*covMat);
+            gChi->SetPoint(it-1,it, chi2/Nbin);
+        }
+        gChi->SetTitle("#chi^{2}_{closure}/N_{dof};n_{iter};#chi^{2}/N_{dof}");
+        gChi->SetMarkerStyle(22);
+    }
+
+    gStyle->SetOptStat(0);
+    auto c = new TCanvas("cAdvanced","Advanced iteration diagnostics",1800,600);
+    int pads = doClosure?3:2;
+    c->Divide(pads,1);
+
+    c->cd(1); gL->Draw("ALP");
+    c->cd(2); gFOM->Draw("ALP");
+    if(doClosure){ c->cd(3); gPad->SetLogy(); gChi->Draw("ALP"); }
+    auto fout = TFile::Open("WTA_V1_EB_IterAdvanced.root","RECREATE");
+    gL->Write(); gFOM->Write(); if(gChi) gChi->Write(); c->Write(); fout->Close();
+
+    std::cout<<"WTA_V1_EB_IterAdvanced.root\n";
+}
+

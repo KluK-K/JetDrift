@@ -1,0 +1,55 @@
+
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1D.h>
+#include <iostream>
+#include <memory>
+
+void Make_V1_EnergyBands_ER(
+  const char* inFile  ="JetFourierAnalysis_WTA11_09_withHungarian.root",
+  const char* outRoot ="WTA_V1_EnergyBands_ER.root",
+  const char* treeName="all_particle_data"
+){
+
+    constexpr int    NSLICE   = 5;  
+    constexpr double ELO[NSLICE] = {10,20,30,35,40};
+    constexpr double EHI[NSLICE] = {20,30,35,40,45};
+
+    constexpr int    NBIN_V1  = 32;     
+    constexpr double V1_MIN   = 0.0;
+    constexpr double V1_MAX   = 1.0;
+
+
+    constexpr int NBIN_TOT = NSLICE * NBIN_V1;  
+    TH1D* hCombo = new TH1D("hV1_EnergyBands",
+        "Reco V_{1} (Energy Slices);Slice + V1 Fraction;Entries",
+        NBIN_TOT, 0.0, NSLICE);
+
+
+    std::unique_ptr<TFile> fin(TFile::Open(inFile, "READ"));
+    auto* t = dynamic_cast<TTree*>(fin->Get(treeName));
+    Float_t v1, E;
+    t->SetBranchAddress("fourierV1", &v1);
+    t->SetBranchAddress("jetEnergy", &E);
+    const Long64_t N = t->GetEntries();
+    for(Long64_t i = 0; i < N; ++i){
+        t->GetEntry(i);
+        if(v1 < V1_MIN || v1 >= V1_MAX) continue;
+
+        int slice = -1;
+        for(int s = 0; s < NSLICE; ++s){
+            if(E >= ELO[s] && E < EHI[s]){ slice = s; break; }
+        }
+        if(slice < 0) continue;
+        double v1frac = (v1 - V1_MIN) / (V1_MAX - V1_MIN); // [0,1)
+        double xval   = slice + v1frac;
+        hCombo->Fill(xval);
+    }
+
+    std::unique_ptr<TFile> fout(TFile::Open(outRoot, "RECREATE"));
+    hCombo->Write();
+    fout->Close();
+    std::cout << "[OK] " << outRoot
+              << " : " << NBIN_TOT << " bins, x-axis = 0 to " << NSLICE << std::endl;
+}
+
