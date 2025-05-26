@@ -1,0 +1,255 @@
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1F.h>
+#include <TH2D.h>
+#include <TCanvas.h>
+#include <TPad.h>
+#include <TStyle.h>
+#include <TLatex.h>
+#include <TMath.h>
+#include <iostream>
+#include <map>
+#include <set>
+#include <algorithm>
+
+struct Key3{
+    Int_t run,evt,j;
+    bool operator<(const Key3&o)const{
+        return (run!=o.run) ? run<o.run :
+               (evt!=o.evt) ? evt<o.evt : j<o.j;
+    }
+};
+
+struct VInfo{ Float_t v1,v2,v3,E; };
+
+
+int findBin(double E,const double *lo,const double *hi,int n)
+{ for(int i=0;i<n;++i) if(E>=lo[i] && E<hi[i]) return i; return -1; }
+
+
+void PlotMatchedV1_Matrix_WithUnmatchedBars_WTA_1_V1_AC_SOPcut(
+        const char *fname="JetFourierAnalysis_WTA11_09_withHungarian.root")
+{
+    const int NC = 5 , NR = 8;
+    const double colL[NC]={10,20,30,35,40}, colH[NC]={20,30,35,40,45};
+    const double rowL[NR]={10,20,30,35,40,45,50,60},
+                 rowH[NR]={20,30,35,40,45,50,60,100};
+
+    const double kSideFrac   = 0.28;
+    const double kBottomFrac = 0.26;
+    const double kThetaMin   = 0.2 * TMath::Pi();
+    const double kThetaMax   = 0.8 * TMath::Pi();
+
+    TFile *f = TFile::Open(fname,"READ");
+    TTree *tMatch = (TTree*)f->Get("jetMatching");
+    TTree *tRec   = (TTree*)f->Get("charged_particle_t");
+    TTree *tGen   = (TTree*)f->Get("charged_particle_tgen");
+    TTree *tSOP   = (TTree*)f->Get("sop_axis_t");          // Reco-SOP 
+    Int_t   r_run,r_evt,r_idx;  Float_t r_v1,r_v2,r_v3,r_E;
+    tRec->SetBranchAddress("runNumber",&r_run);
+    tRec->SetBranchAddress("eventNumber",&r_evt);
+    tRec->SetBranchAddress("jetIndex",&r_idx);
+    tRec->SetBranchAddress("fourierV1",&r_v1);
+    tRec->SetBranchAddress("fourierV2",&r_v2);
+    tRec->SetBranchAddress("fourierV3",&r_v3);
+    tRec->SetBranchAddress("jetEnergy",&r_E);
+    Int_t   g_run,g_evt,g_idx;  Float_t g_v1,g_v2,g_v3,g_E;
+    tGen->SetBranchAddress("runNumber",&g_run);
+    tGen->SetBranchAddress("eventNumber",&g_evt);
+    tGen->SetBranchAddress("jetIndex",&g_idx);
+    tGen->SetBranchAddress("fourierV1",&g_v1);
+    tGen->SetBranchAddress("fourierV2",&g_v2);
+    tGen->SetBranchAddress("fourierV3",&g_v3);
+    tGen->SetBranchAddress("jetEnergy",&g_E);
+    std::map<Key3,VInfo> recMap , genMap;
+    for(Long64_t i=0,n=tRec->GetEntries(); i<n; ++i){
+        tRec->GetEntry(i);
+        recMap[{r_run,r_evt,r_idx}] = {r_v1,r_v2,r_v3,r_E};
+    }
+    for(Long64_t i=0,n=tGen->GetEntries(); i<n; ++i){
+        tGen->GetEntry(i);
+        genMap[{g_run,g_evt,g_idx}] = {g_v1,g_v2,g_v3,g_E};
+    }
+
+    std::map<Key3,float> sopThetaRec;
+    Int_t s_run,s_evt,s_idx; Float_t s_theta;
+    tSOP->SetBranchAddress("runNumber",&s_run);
+    tSOP->SetBranchAddress("eventNumber",&s_evt);
+    tSOP->SetBranchAddress("jetIndex",&s_idx);
+    tSOP->SetBranchAddress("sopTheta",&s_theta);
+    for(Long64_t i=0,n=tSOP->GetEntries(); i<n; ++i){
+        tSOP->GetEntry(i);
+        sopThetaRec[{s_run,s_evt,s_idx}] = s_theta;
+    }
+
+    std::set<Key3> matchedRec , matchedGen;
+    Int_t m_run,m_evt,m_recIdx,m_genIdx,m_isMatched;
+    tMatch->SetBranchAddress("RunNo",&m_run);
+    tMatch->SetBranchAddress("EventNo",&m_evt);
+    tMatch->SetBranchAddress("recJetIndex",&m_recIdx);
+    tMatch->SetBranchAddress("genJetIndex",&m_genIdx);
+    tMatch->SetBranchAddress("isMatched",&m_isMatched);
+
+    for(Long64_t i=0,n=tMatch->GetEntries(); i<n; ++i){
+        tMatch->GetEntry(i);
+        if(m_isMatched==1 && m_recIdx>=0 && m_genIdx>=0){
+            matchedRec.insert({m_run,m_evt,m_recIdx});
+            matchedGen.insert({m_run,m_evt,m_genIdx});
+        }
+    }
+
+    TH2D *hMain[NR][NC];
+    for(int ir=0;ir<NR;++ir)
+      for(int ic=0;ic<NC;++ic)
+        hMain[ir][ic] = new TH2D(Form("hM_%d_%d",ir,ic),
+                                 "",40,-0.2,1.0,40,-0.2,1.0);
+
+    const int NBINS_V1 = 40;
+    TH1F *hRecV1Row[NR];
+    TH1F *hGenV1Col[NC];
+
+    for(int ir=0;ir<NR;++ir){
+        hRecV1Row[ir] = new TH1F(Form("hRec_%d",ir),
+                          Form("Reco-unmatched (%.0f–%.0f GeV)",rowL[ir],rowH[ir]),
+                          NBINS_V1,-0.2,1.0);
+        hRecV1Row[ir]->SetLineColor(kBlue+2);
+        hRecV1Row[ir]->SetLineWidth(1);
+        hRecV1Row[ir]->SetFillColor(kBlue+1);
+    }
+    for(int ic=0;ic<NC;++ic){
+        hGenV1Col[ic] = new TH1F(Form("hGen_%d",ic),
+                          Form("Gen-unmatched (%.0f–%.0f GeV)",colL[ic],colH[ic]),
+                          NBINS_V1,-0.2,1.0);
+        hGenV1Col[ic]->SetLineColor(kBlue+2);
+        hGenV1Col[ic]->SetLineWidth(1);
+        hGenV1Col[ic]->SetFillColor(kBlue+1);
+    }
+
+    for(Long64_t i=0,n=tMatch->GetEntries(); i<n; ++i){
+        tMatch->GetEntry(i);
+        if(m_isMatched!=1 || m_recIdx<0 || m_genIdx<0) continue;
+
+        Key3 keyR{m_run,m_evt,m_recIdx};
+        Key3 keyG{m_run,m_evt,m_genIdx};
+        auto itR = recMap.find(keyR);
+        auto itG = genMap.find(keyG);
+        if(itR==recMap.end() || itG==genMap.end()) continue;
+
+        // get SOP θ
+        auto itTheta = sopThetaRec.find(keyR);
+        if(itTheta==sopThetaRec.end()) continue;
+        double thetaRec = itTheta->second;
+        if(thetaRec < kThetaMin || thetaRec > kThetaMax) continue;
+
+        int ic = findBin(itG->second.E,colL,colH,NC);
+        int ir = findBin(itR->second.E,rowL,rowH,NR);
+        if(ic<0 || ir<0) continue;
+
+        hMain[ir][ic]->Fill(itR->second.v1 , itG->second.v1);
+    }
+
+    for(const auto &kv : recMap){
+        if(matchedRec.count(kv.first)) continue;
+        int ir = findBin(kv.second.E,rowL,rowH,NR);
+        if(ir>=0) hRecV1Row[ir]->Fill(kv.second.v1);
+    }
+    for(const auto &kv : genMap){
+        if(matchedGen.count(kv.first)) continue;
+        int ic = findBin(kv.second.E,colL,colH,NC);
+        if(ic>=0) hGenV1Col[ic]->Fill(kv.second.v1);
+    }
+
+    int maxRecCnt = 0 , maxGenCnt = 0;
+    for(int ir=0;ir<NR;++ir)
+        maxRecCnt = std::max(maxRecCnt,(int)hRecV1Row[ir]->GetMaximum());
+    for(int ic=0;ic<NC;++ic)
+        maxGenCnt = std::max(maxGenCnt,(int)hGenV1Col[ic]->GetMaximum());
+    if(maxRecCnt==0) maxRecCnt=1;
+    if(maxGenCnt==0) maxGenCnt=1;
+
+    gStyle->SetOptStat(0);
+    const int W=2000 , H=2600;
+    TCanvas *can=new TCanvas("can","Matrix-SOPcut",W,H);
+
+    TPad *pSide    = new TPad("pSide"   ,"",0          ,kBottomFrac, kSideFrac ,1);
+    TPad *pBottom  = new TPad("pBottom" ,"",kSideFrac ,0          , 1         ,kBottomFrac);
+    TPad *pCentral = new TPad("pCentral","",kSideFrac ,kBottomFrac, 1         ,1);
+
+    pSide  ->Draw();
+    pBottom->Draw();
+    pCentral->Draw();
+    pCentral->Divide(NC,NR,0.003,0.003);
+
+    TLatex lat; lat.SetTextFont(42); lat.SetTextSize(0.035);
+    for(int ir=0;ir<NR;++ir){
+        int padRow = NR-1-ir;
+        for(int ic=0;ic<NC;++ic){
+            int padIdx = padRow*NC + ic + 1;
+            pCentral->cd(padIdx);
+
+            hMain[ir][ic]->GetXaxis()->SetTitle("V_{1}(t)");
+            hMain[ir][ic]->GetYaxis()->SetTitle("V_{1}(t_{gen})");
+            hMain[ir][ic]->Draw("colz");
+
+            lat.SetTextAlign(13);
+            lat.DrawLatexNDC(0.05,0.88,Form("E_{tgen}: %.0f–%.0f GeV",colL[ic],colH[ic]));
+            lat.DrawLatexNDC(0.05,0.80,Form("E_{t}: %.0f–%.0f GeV",rowL[ir],rowH[ir]));
+        }
+    }
+    pSide->Divide(1,NR,0,0);
+    for(int ir=0;ir<NR;++ir){
+        int padRow = NR-1-ir;
+        TPad *pad = (TPad*)pSide->cd(padRow+1);
+        pad->SetLeftMargin(0.28);
+        pad->SetRightMargin(0.07);
+        pad->SetBottomMargin(0.13);
+        pad->SetTopMargin(0.10);
+        pad->SetGridx(); pad->SetGridy();
+
+        hRecV1Row[ir]->GetXaxis()->SetRangeUser(0,maxRecCnt*1.15);
+        hRecV1Row[ir]->GetYaxis()->SetRangeUser(-0.2,1.0);
+
+        hRecV1Row[ir]->GetXaxis()->SetTitle("entries");
+        hRecV1Row[ir]->GetYaxis()->SetTitle("V_{1}(t)");
+
+        hRecV1Row[ir]->GetXaxis()->SetLabelSize(0.10);
+        hRecV1Row[ir]->GetYaxis()->SetLabelSize(0.10);
+        hRecV1Row[ir]->GetXaxis()->SetTitleSize(0.10);
+        hRecV1Row[ir]->GetYaxis()->SetTitleSize(0.10);
+
+        hRecV1Row[ir]->Draw("Hbar0");
+    }
+    pBottom->Divide(NC,1,0,0);
+    for(int ic=0;ic<NC;++ic){
+        TPad *pad = (TPad*)pBottom->cd(ic+1);
+        pad->SetLeftMargin(0.13);
+        pad->SetRightMargin(0.05);
+        pad->SetBottomMargin(0.30);
+        pad->SetTopMargin(0.07);
+        pad->SetGridx(); pad->SetGridy();
+
+        hGenV1Col[ic]->GetXaxis()->SetRangeUser(-0.2,1.0);
+        hGenV1Col[ic]->GetYaxis()->SetRangeUser(0,maxGenCnt*1.15);
+
+        hGenV1Col[ic]->GetXaxis()->SetTitle("V_{1}(t_{gen})");
+        hGenV1Col[ic]->GetYaxis()->SetTitle("entries");
+
+        hGenV1Col[ic]->GetXaxis()->SetLabelSize(0.10);
+        hGenV1Col[ic]->GetYaxis()->SetLabelSize(0.10);
+        hGenV1Col[ic]->GetXaxis()->SetTitleSize(0.10);
+        hGenV1Col[ic]->GetYaxis()->SetTitleSize(0.10);
+
+        hGenV1Col[ic]->Draw("bar0");
+    }
+
+    can->cd();
+    lat.SetTextAlign(22); lat.SetTextSize(0.05);
+    lat.DrawLatexNDC(0.5,0.97,
+      "Matrix of V_{1}(t) vs V_{1}(t_{gen})  –  matched jets filtered by SOP #theta #in [0.2#pi,0.8#pi]");
+
+    can->SaveAs("Matrix_V1_t_vs_tgen_EnergyBinned_WithUnmatchedBars_WTA_V1_SOPcut.root");
+    std::cout<<"output -> Matrix_V1_t_vs_tgen_EnergyBinned_WithUnmatchedBars_WTA_V1_SOPcut.root\n";
+
+    f->Close();
+}
+
