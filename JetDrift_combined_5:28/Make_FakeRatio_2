@@ -1,0 +1,42 @@
+
+#include <TFile.h>
+#include <TH1.h>
+#include <iostream>
+#include <memory>
+#include <cmath>
+
+void Make_FakeRatio_2(
+    const char* fakeFile  = "Combined_V1_Matrix_WTA_SOPcut_v5.root",
+    const char* fakeHist  = "hBigBottom",
+    const char* recoFile  = "WTA_V1_EnergyBands_ER_8slices_tgen.root",
+    const char* recoHist  = "hV1_EnergyBands",
+    const char* outFile   = "V1_EnergyBands_FAKE_RATIO_2.root")
+{
+    std::unique_ptr<TFile> fFake(TFile::Open(fakeFile, "READ"));
+    auto* hFakeSrc = dynamic_cast<TH1*>(fFake->Get(fakeHist));
+
+    std::unique_ptr<TFile> fReco(TFile::Open(recoFile, "READ"));
+    auto* hReco = dynamic_cast<TH1*>(fReco->Get(recoHist));
+    const int NB = std::min(hFakeSrc->GetNbinsX(), hReco->GetNbinsX());
+    auto* hRatio = (TH1D*)hFakeSrc->Clone("hFakeOverFakePlusMatch");
+    hRatio->Reset();
+    hRatio->SetTitle("fake / (fake + match);Slice + V_{1} bin;Ratio");
+    for (int i = 1; i <= NB; ++i) {
+        const double nF = hFakeSrc->GetBinContent(i);      // fake
+        const double nR = hReco   ->GetBinContent(i);      // reco_total = fake + match
+        const double nM = nR - nF;                         // matched
+        const double ratio = nF / nR;
+        const double err = (nR > 0) ? std::sqrt(ratio * (1.0 - ratio) / nR) : 0.0;
+
+        hRatio->SetBinContent(i, ratio);
+        hRatio->SetBinError(i,   err);
+    }
+
+    std::unique_ptr<TFile> fout(TFile::Open(outFile, "RECREATE"));
+    hRatio->Write();
+    fout->Close();
+
+    std::cout << "[OK] → " << outFile << '\n';
+}
+
+

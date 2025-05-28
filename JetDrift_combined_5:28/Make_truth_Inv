@@ -1,0 +1,45 @@
+#include <TFile.h>
+#include <TH1.h>
+#include <iostream>
+#include <memory>
+#include <algorithm> 
+
+void Make_truth_Inv(
+    const char* recoFile   = "Unfold_RecoPure.root",
+    const char* recoHist   = "hTruthRecoPure",
+    const char* ratioFile  = "V1_EnergyBands_FAKE_RATIO_2.root",
+    const char* ratioHist  = "hFakeOverFakePlusMatch",
+    const char* outFile    = "Make_truth_Inv.root")
+{
+
+    auto fRec = std::unique_ptr<TFile>(TFile::Open(recoFile,  "READ"));
+    auto fRat = std::unique_ptr<TFile>(TFile::Open(ratioFile, "READ"));
+
+    TH1* hRec = dynamic_cast<TH1*>(fRec->Get(recoHist));
+    TH1* hR   = dynamic_cast<TH1*>(fRat->Get(ratioHist));
+    const int NB = hRec->GetNbinsX();
+    auto* hInv = (TH1D*)hRec->Clone("hTruth_InvScaled");
+    hInv->Reset();
+    hInv->SetTitle("Inv scaled truth: hTruthRecoPure / (1 - r);Bin;Entries");
+    for (int i = 1; i <= NB; ++i) {
+        double nRec = hRec->GetBinContent(i);
+        double r    = hR  ->GetBinContent(i);
+        r = std::clamp(r, 0.0, std::nextafter(1.0, 0.0));
+        double denom = 1.0 - r;
+        if (denom <= 0.0) {
+            hInv->SetBinContent(i, 0.0);
+            hInv->SetBinError  (i, 0.0);
+        } else {
+            double newVal = nRec / denom;
+            hInv->SetBinContent(i, newVal);
+            hInv->SetBinError  (i, 0.0);
+        }
+    }
+
+    auto fout = std::unique_ptr<TFile>(TFile::Open(outFile, "RECREATE"));
+    hInv->Write();
+    fout->Close();
+
+    std::cout << "[OK] → " << outFile << "\n";
+}
+
