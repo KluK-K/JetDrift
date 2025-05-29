@@ -1,0 +1,65 @@
+
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1D.h>
+#include <iostream>
+#include <memory>
+
+void WTA_Make_V1_EnergyBands_f_ER_normAll(
+  const char* inFile   = "JetFourierAnalysis_WTA11_09_withHungarian.root",
+  const char* outRoot  = "WTA_V1_EnergyBands_ER_8slices_tgen_normAll.root",
+  const char* treeName = "all_particle_tgen")
+{
+    constexpr int    NSLICE   = 5;
+    constexpr double ELO[NSLICE] = {10, 20, 30, 35, 40};
+    constexpr double EHI[NSLICE] = {20, 30, 35, 40, 45};
+// Or 8 and 10-100
+    constexpr int    NBIN_V1  = 40;
+    constexpr double V1_MIN   = 0.0;
+    constexpr double V1_MAX   = 1.0;
+
+    constexpr int NBIN_TOT = NSLICE * NBIN_V1;
+    TH1D* hCombo = new TH1D("hV1_EnergyBands",
+        "tgen V_{1} (8 Energy Slices);Slice + V_{1} fraction;Entries",
+        NBIN_TOT, 0.0, static_cast<double>(NSLICE));
+
+    std::unique_ptr<TFile> fin(TFile::Open(inFile, "READ"));
+    auto* t = dynamic_cast<TTree*>(fin->Get(treeName));
+
+    Float_t v1 = 0.0f, E = 0.0f;
+    t->SetBranchAddress("fourierV1", &v1);
+    t->SetBranchAddress("jetEnergy", &E);
+
+    const Long64_t N = t->GetEntries();
+    for(Long64_t i = 0; i < N; ++i){
+        t->GetEntry(i);
+        if(v1 < V1_MIN || v1 >= V1_MAX) continue;
+
+        int slice = -1;
+        for(int s = 0; s < NSLICE; ++s){
+            if(E >= ELO[s] && E < EHI[s]){ slice = s; break; }
+        }
+        if(slice < 0) continue;
+
+        double v1frac = (v1 - V1_MIN) / (V1_MAX - V1_MIN);   // 0–1
+        double xval   = slice + v1frac;                       // 0–8
+        hCombo->Fill(xval);
+    }
+
+    TH1D* hComboProb = (TH1D*)hCombo->Clone("hV1_EnergyBands_probAll");
+    hComboProb->SetTitle("tgen V_{1} (8 slices, global norm);Slice + V_{1} fraction;Probability");
+
+    const double totalJets = hCombo->Integral();
+    if(totalJets > 0.0) hComboProb->Scale(1.0 / totalJets); 
+
+    std::unique_ptr<TFile> fout(TFile::Open(outRoot, "RECREATE"));
+    hCombo     ->Write();
+    hComboProb ->Write();
+    fout->Close();
+
+    std::cout << "[OK] " << outRoot << 
+              << "      • hV1_EnergyBands\n"
+              << "      • hV1_EnergyBands_probAll\n";
+}
+
+
