@@ -1,0 +1,64 @@
+#include <TFile.h>
+#include <TH1.h>
+#include <TH1D.h>
+#include <TCanvas.h>
+#include <TLegend.h>
+#include <memory>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+void Draw_TruthInv_V1Comparison(
+    const char* invFile = "Make_truth_Inv_normAll.root",
+    const char* invHist = "hTruth_InvScaled",
+    const char* v1File  = "WTA_V1_EnergyBands_ER_8slices_tgen_normAll.root",
+    const char* v1Hist  = "hV1_EnergyBands_probAll"
+) {
+    auto fInv = std::unique_ptr<TFile>(TFile::Open(invFile, "READ"));
+    auto* hInv = dynamic_cast<TH1*>(fInv->Get(invHist));
+    auto fV1 = std::unique_ptr<TFile>(TFile::Open(v1File, "READ"));
+    auto* hV1 = dynamic_cast<TH1*>(fV1->Get(v1Hist));
+    const int nBinInv = hInv->GetNbinsX();
+    const int nBinV1  = hV1->GetNbinsX();
+    const double xminInv = hInv->GetXaxis()->GetXmin();
+    const double xmaxInv = hInv->GetXaxis()->GetXmax();
+    const double xminV1  = hV1->GetXaxis()->GetXmin();
+    const double xmaxV1  = hV1->GetXaxis()->GetXmax();
+
+    if (std::fabs(xminInv - xminV1) > 1e-6 || std::fabs(xmaxInv - xmaxV1) > 1e-6) {
+
+        std::vector<double> edges(nBinInv + 1);
+        for (int i = 1; i <= nBinInv; ++i)
+            edges[i - 1] = hInv->GetBinLowEdge(i);
+        edges[nBinInv] = hInv->GetBinLowEdge(nBinInv) + hInv->GetBinWidth(nBinInv);
+
+        TH1D* hV1Aligned = new TH1D("hV1Aligned",
+                                    hV1->GetTitle(),
+                                    nBinInv,
+                                    edges.data());
+
+        for (int i = 1; i <= nBinInv; ++i) {
+            hV1Aligned->SetBinContent(i, hV1->GetBinContent(i));
+            hV1Aligned->SetBinError  (i, hV1->GetBinError  (i));
+        }
+        hV1 = hV1Aligned;
+    }
+
+    hInv->SetLineColor(kBlue);
+    hInv->SetLineWidth(2);
+    hInv->SetMarkerSize(0);
+    hV1->SetLineColor(kRed);
+    hV1->SetLineWidth(2);
+    hV1->SetMarkerSize(0);
+    TCanvas* c = new TCanvas("cComp", "Truth Inv vs TGen V1", 900, 600);
+    hInv->SetTitle("Bin by Bin");
+    hInv->Draw("HIST");
+    hV1 ->Draw("HIST SAME");
+    TLegend* leg = new TLegend(0.65, 0.75, 0.88, 0.88);
+    leg->AddEntry(hInv, "Inv Scaled Truth",     "l");
+    leg->AddEntry(hV1,  "Global Norm TGen V1",  "l");
+    leg->Draw();
+    c->SaveAs("Comparison_TruthInv_TGenV1_Hist.root");
+}
+
+
