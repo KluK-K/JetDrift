@@ -1,0 +1,43 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TH2D.h>
+#include <memory>
+#include <iostream>
+#include "RooUnfoldResponse.h"
+#include "RooUnfoldBayes.h"
+
+void Unfold_RecoPure(
+    const char* respFile       = "Combined_V1_Matrix_WTA_SOPcut_v5_normAll.root",
+    const char* recoPureFile   = "Make_RecoPure_t_NoErr_normAll.root",
+    const char* outFile        = "Unfold_RecoPure_normAll.root",
+    int         nIter          = 14
+){
+    auto fResp = std::unique_ptr<TFile>(TFile::Open(respFile,"READ"));
+    auto* hResp2D = dynamic_cast<TH2D*>(fResp->Get("hBigCentral"));
+    TH1D* hRecoTrain = hResp2D->ProjectionX("hRecoTrain");
+    TH1D* hGenTrain  = hResp2D->ProjectionY("hGenTrain");
+
+    auto fPure = std::unique_ptr<TFile>(TFile::Open(recoPureFile,"READ"));
+    auto* hRecoPure = dynamic_cast<TH1D*>(fPure->Get("hRecoPure_t"));
+    auto* hDataMap = (TH1D*)hRecoTrain->Clone("hDataMap");
+    hDataMap->Reset();
+    for(int ib = 1; ib <= hRecoPure->GetNbinsX(); ++ib){
+        hDataMap->SetBinContent(ib, hRecoPure->GetBinContent(ib));
+        hDataMap->SetBinError  (ib, hRecoPure->GetBinError  (ib));
+    }
+
+    RooUnfoldResponse response(hRecoTrain, hGenTrain, hResp2D);
+    RooUnfoldBayes    unfold(&response, hDataMap, nIter);
+
+    auto* hTruth = dynamic_cast<TH1D*>(unfold.Hreco()); 
+    hTruth->SetName ("hTruthRecoPure");
+    hTruth->SetTitle("Unfolded truth from pure reco");
+    auto fout = std::unique_ptr<TFile>(TFile::Open(outFile,"RECREATE"));
+    hDataMap->Write();
+    hTruth  ->Write();
+    fout->Close();
+    std::cout<<"Unfold_RecoPure → "<<outFile
+             <<"  (iteration = "<<nIter<<")\n";
+}
+
+

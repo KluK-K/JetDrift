@@ -1,0 +1,51 @@
+
+#include <TFile.h>
+#include <TH1.h>
+#include <iostream>
+#include <memory>
+
+void Make_RecoPure_t_NoErr(
+    const char* recoFile  = "WTA_V1_EnergyBands_ER_8slices_t_normAll.root",
+    const char* recoHist  = "hV1_EnergyBands_probAll",
+    const char* ratioFile = "WTA_V1_EnergyBands_FAKE_RATIO.root",
+    const char* ratioHist = "hFakeOverFakePlusMatch",
+    const char* outFile   = "Make_RecoPure_t_NoErr_normAll.root")
+{
+
+    std::unique_ptr<TFile> fRec(TFile::Open(recoFile,"READ"));
+    std::unique_ptr<TFile> fRat(TFile::Open(ratioFile,"READ"));
+
+    auto* hRec = dynamic_cast<TH1*>(fRec->Get(recoHist));
+    auto* hR   = dynamic_cast<TH1*>(fRat->Get(ratioHist));
+
+    const int NB = hRec->GetNbinsX();
+    auto* hFake = (TH1D*)hRec->Clone("hFake_t");
+    hFake->Reset();
+    hFake->SetTitle("Fake counts : nRec × ratio");
+
+    auto* hPure = (TH1D*)hRec->Clone("hRecoPure_t");
+    hPure->Reset();
+    hPure->SetTitle("Reco-t after fake subtraction (no error)");
+    for(int i=1;i<=NB;++i){
+        double nRec = hRec->GetBinContent(i);
+        double r    = hR  ->GetBinContent(i);
+
+        double nFake = nRec * r;
+        double nPure = nRec - nFake;    
+
+        hFake->SetBinContent(i,nFake);
+        hPure->SetBinContent(i,nPure);
+
+        hFake->SetBinError(i,0.0);
+        hPure->SetBinError(i,0.0);
+    }
+
+    std::unique_ptr<TFile> fout(TFile::Open(outFile,"RECREATE"));
+    hFake->Write();
+    hPure->Write();
+    fout->Close();
+
+    std::cout << "[OK] " << outFile
+              << "  (hFake_t, hRecoPure_t)\n";
+}
+
