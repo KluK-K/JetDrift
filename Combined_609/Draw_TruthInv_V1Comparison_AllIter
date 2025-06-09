@@ -1,0 +1,70 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TCanvas.h>
+#include <TLegend.h>
+#include <TString.h>
+#include <memory>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+
+static TH1* GetHistFlexible(TFile* f, const TString& base, int it){
+    TString name = Form("%s_iter%02d", base.Data(), it);
+    TH1* h = dynamic_cast<TH1*>(f->Get(name));
+    return h;
+}
+
+void Draw_TruthInv_V1Comparison_AllIter(
+    const char* invFile  = "Make_truth_Inv_AllIter.root",
+    const char* invBase  = "hTruth_InvScaled",
+    const char* v1File   = "WTA_V1_EnergyBands_ER_8slices_tgen_normAll.root",
+    const char* v1Hist   = "hV1_EnergyBands_probAll",
+    const char* outFile  = "Comp_TruthInv_TGenV1_AllIter.root",
+    int         maxIter  = 20
+){
+    std::unique_ptr<TFile> fInv(TFile::Open(invFile,"READ"));
+    std::unique_ptr<TFile> fV1 (TFile::Open(v1File,"READ"));
+ 
+    TH1* hV1Orig = dynamic_cast<TH1*>(fV1->Get(v1Hist));
+    std::unique_ptr<TFile> fout(TFile::Open(outFile,"RECREATE"));
+    for(int it=1; it<=maxIter; ++it){
+        TH1* hInv = GetHistFlexible(fInv.get(), invBase, it);
+        std::unique_ptr<TH1> hV1Clone(static_cast<TH1*>(hV1Orig->Clone(
+                               Form("hV1_clone_iter%d", it))));
+
+        TH1* hV1 = hV1Clone.get();
+        if( hInv->GetNbinsX()           != hV1->GetNbinsX() ||
+            hInv->GetXaxis()->GetXmin() != hV1->GetXaxis()->GetXmin() ||
+            hInv->GetXaxis()->GetXmax() != hV1->GetXaxis()->GetXmax() ){
+            int    nB = hInv->GetNbinsX();
+            std::vector<double> edges(nB+1);
+            for(int i=1;i<=nB;++i) edges[i-1]=hInv->GetBinLowEdge(i);
+            edges[nB]=hInv->GetBinLowEdge(nB)+hInv->GetBinWidth(nB);
+
+            TH1D* hAligned = new TH1D(Form("hV1_aligned_iter%d",it),
+                                       hV1->GetTitle(), nB, edges.data());
+            for(int i=1;i<=nB;++i){
+                hAligned->SetBinContent(i, hV1->GetBinContent(i));
+                hAligned->SetBinError  (i, hV1->GetBinError  (i));
+            }
+            hV1 = hAligned;
+        }
+
+        hInv->SetLineColor(kBlue+1); hInv->SetLineWidth(2);
+        hV1 ->SetLineColor(kRed);    hV1 ->SetLineWidth(2);
+        TCanvas* c = new TCanvas(Form("cComp_iter%d",it),
+                                 Form("Inv Truth vs TGen V1 (iter %d)",it),
+                                 900,600);
+        hInv->SetTitle(Form("Iter %d: Inv Scaled Truth vs TGen V1;Bin;Entries",it));
+        hInv->Draw("HIST");
+        hV1 ->Draw("HIST SAME");
+
+        TLegend* leg = new TLegend(0.62,0.75,0.88,0.88);
+        leg->AddEntry(hInv,"Inv Scaled Truth","l");
+        leg->AddEntry(hV1 ,"Global Norm TGen V1","l"); leg->Draw();
+        c->Write(); 
+    }
+
+    fout->Close();
+}
