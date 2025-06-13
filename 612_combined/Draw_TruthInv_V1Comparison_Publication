@@ -1,0 +1,78 @@
+#include <TFile.h>
+#include <TCanvas.h>
+#include <TH1.h>
+#include <TLegend.h>
+#include <TStyle.h>
+#include <TLatex.h>
+#include <TString.h>
+#include <memory>
+#include <iostream>
+
+void Draw_TruthInv_V1Comparison_Publication(
+    const char* inputFile = "Comp_TruthInv_TGenV1_AllIter.root",
+    const char* outputFile = "PublicationStyle_V1Compare_AllIter.root",
+    int maxIter = 20
+){
+    gStyle->SetOptStat(0);
+    gStyle->SetTitleFontSize(0.04);
+    gStyle->SetLabelSize(0.035, "XY");
+    gStyle->SetTitleSize(0.04, "XY");
+    gStyle->SetTitleOffset(1.2, "Y");
+    gStyle->SetTitleOffset(1.0, "X");
+    gStyle->SetPadTopMargin(0.08);
+    gStyle->SetPadBottomMargin(0.12);
+    gStyle->SetPadLeftMargin(0.14);
+    gStyle->SetPadRightMargin(0.05);
+    gStyle->SetLegendBorderSize(0);
+
+    std::unique_ptr<TFile> fIn(TFile::Open(inputFile, "READ"));
+    std::unique_ptr<TFile> fOut(TFile::Open(outputFile, "RECREATE"));
+    for(int it = 1; it <= maxIter; ++it){
+        TString cname = Form("cComp_iter%d", it);
+        TCanvas* cOld = dynamic_cast<TCanvas*>(fIn->Get(cname));
+        TH1* hInv = nullptr;
+        TH1* hV1  = nullptr;
+        TList* list = cOld->GetListOfPrimitives();
+        for(auto&& obj : *list){
+            TH1* h = dynamic_cast<TH1*>(obj);
+            if(h && TString(h->GetName()).Contains("hTruth")) hInv = h;
+            if(h && TString(h->GetName()).Contains("hV1"))    hV1  = h;
+        }
+        hInv->SetLineColor(kBlue+1);
+        hInv->SetLineWidth(1);
+        hInv->SetMarkerColor(kBlue+1);
+        hInv->SetMarkerStyle(20);
+        hInv->SetMarkerSize(0.7);
+        hV1->SetLineColor(kRed);
+        hV1->SetLineWidth(1);
+        hV1->SetMarkerColor(kRed);
+        hV1->SetMarkerStyle(24);
+        hV1->SetMarkerSize(0.7);
+        hInv->SetTitle("");
+        hInv->GetXaxis()->SetTitle("Jet Energy Bin");
+        hInv->GetYaxis()->SetTitle("Probability Density");
+        hInv->GetYaxis()->SetTitleOffset(1.5);
+        hInv->SetMinimum(0);
+        TCanvas* c = new TCanvas(Form("cPub_iter%d", it), "", 800, 600);
+        c->SetGrid();
+
+        hInv->Draw("E1"); 
+        hInv->Draw("HIST SAME");
+        hV1->Draw("E1 SAME");
+        hV1->Draw("HIST SAME");
+        TLegend* leg = new TLegend(0.62, 0.75, 0.88, 0.88);
+        leg->SetTextFont(42);
+        leg->SetTextSize(0.037);
+        leg->AddEntry(hInv, "Inv. Scaled Truth", "lep");
+        leg->AddEntry(hV1, "TGen V1 Distribution", "lep");
+        leg->Draw();
+        TLatex latex;
+        latex.SetNDC();
+        latex.SetTextFont(42);
+        latex.SetTextSize(0.04);
+        latex.DrawLatex(0.13, 0.93, Form("V_{1} Comparison at Iteration %d", it));
+        c->Write();
+        delete c;
+    }
+    fOut->Close();
+}

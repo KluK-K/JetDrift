@@ -1,0 +1,99 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TGraph.h>
+#include <TCanvas.h>
+#include <TString.h>
+#include <memory>
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+
+static TH1* GetHistFlexible(TFile* f, const TString& base, int it)
+{
+    TString name = Form("%s_iter%02d", base.Data(), it);
+    TH1* h = dynamic_cast<TH1*>(f->Get(name));
+    return h;
+}
+
+void Metric_TruthInv_AllIter(
+    const char* invFile  = "Make_truth_Inv_AllIter.root",
+    const char* invBase  = "hTruth_InvScaled",
+    const char* v1File   = "WTA_V1_EnergyBands_ER_8slices_tgen_normAll.root",
+    const char* v1Hist   = "hV1_EnergyBands_probAll",
+    const char* outFile  = "Metric_TruthInv_AllIter.root",
+    int         maxIter  = 20)
+{
+    const int binsPerSlice = 40;
+    const int sliceStart   = 2; 
+    const int sliceCount   = 3;  // 3 slices
+    const int firstBinIdx  = sliceStart * binsPerSlice + 1;
+
+    std::unique_ptr<TFile> fInv(TFile::Open(invFile, "READ"));
+    std::unique_ptr<TFile> fV1 (TFile::Open(v1File, "READ"));
+    TH1* hV1Orig = dynamic_cast<TH1*>(fV1->Get(v1Hist));
+    std::unique_ptr<TFile> fout(TFile::Open(outFile, "RECREATE"));
+    TH1D* hMetric = new TH1D("hMetric", "Metric vs Iter;Iteration;Metric",
+                             maxIter, 0.5, maxIter + 0.5);
+    for (int it = 1; it <= maxIter; ++it) {
+        TH1* hInv = GetHistFlexible(fInv.get(), invBase, it);
+        std::unique_ptr<TH1> hV1Clone(static_cast<TH1*>(hV1Orig->Clone(
+                                   Form("hV1_clone_iter%d", it))));
+        TH1* hRed = hV1Clone.get();
+        if (hInv->GetNbinsX() != hRed->GetNbinsX() ||
+            hInv->GetXaxis()->GetXmin() != hRed->GetXaxis()->GetXmin() ||
+            hInv->GetXaxis()->GetXmax() != hRed->GetXaxis()->GetXmax())
+        {
+            int nB = hInv->GetNbinsX();
+            std::vector<double> edges(nB + 1);
+            for (int i = 1; i <= nB; ++i) {
+                edges[i - 1] = hInv->GetBinLowEdge(i);
+            }
+            edges[nB] = hInv->GetBinLowEdge(nB) + hInv->GetBinWidth(nB);
+            TH1D* hAligned = new TH1D(Form("hRed_aligned_iter%d", it),
+                                      hRed->GetTitle(), nB, edges.data());
+            for (int i = 1; i <= nB; ++i) {
+                hAligned->SetBinContent(i, hRed->GetBinContent(i));
+                hAligned->SetBinError  (i, hRed->GetBinError  (i));
+            }
+            hRed = hAligned;
+        }
+
+        double sumDiff = 0.0;
+        double sumErr2 = 0.0;
+
+        for (int slice = 0; slice < sliceCount; ++slice) {
+            int binStart = firstBinIdx + slice * binsPerSlice;
+            int binEnd   = binStart + binsPerSlice - 1;
+            double intBlue = 0., intRed = 0.;
+            for (int b = binStart; b <= binEnd; ++b) {
+                intBlue += hInv->GetBinContent(b);
+                intRed  += hRed->GetBinContent(b);
+            }
+            const double scaleBlue = 1.0 / intBlue;
+            const double scaleRed  = 1.0 / intRed;
+
+            for (int b = binStart; b <= binEnd; ++b) {
+                double blue = hInv->GetBinContent(b) * scaleBlue;
+                double red  = hRed->GetBinContent(b) * scaleRed;
+                double eB   = hInv->GetBinError  (b) * scaleBlue;
+
+                sumDiff += (blue - red) * (blue - red);
+                sumErr2 += eB * eB;
+            }
+        }
+        double metric = sumDiff + sumErr2;
+        hMetric->SetBinContent(it, metric);
+        hMetric->SetBinError  (it, 0.0);
+    } 
+    TCanvas* cMetric = new TCanvas("cMetric", "Metric vs Iter", 800, 500);
+    hMetric->SetMarkerStyle(20);
+    hMetric->Draw("P");
+    fout->cd();
+    cMetric->Write();
+    hMetric->Write();
+    fout->Close();
+
+}
+
+

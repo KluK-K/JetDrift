@@ -1,0 +1,47 @@
+#include <TFile.h>
+#include <TH1D.h>
+#include <TH2D.h>
+#include <memory>
+#include <iostream>
+#include "RooUnfoldResponse.h"
+#include "RooUnfoldBayes.h"
+
+void Unfold_RecoPure_AllIter(
+    const char* respFile       = "Combined_V1_Matrix_WTA_SOPcut_v5_normAll.root",
+    const char* recoPureFile   = "Make_RecoPure_t_normAll.root",
+    const char* outFile        = "Unfold_RecoPure_AllIter.root",
+    int         maxIter        = 20)
+{
+    std::unique_ptr<TFile> fResp(TFile::Open(respFile,"READ"));
+    auto* hResp2D = dynamic_cast<TH2D*>(fResp->Get("hBigCentral"));
+    TH1D* hRecoTrain = hResp2D->ProjectionX("hRecoTrain");
+    TH1D* hGenTrain  = hResp2D->ProjectionY("hGenTrain");
+    hRecoTrain->Sumw2();
+    hGenTrain ->Sumw2();
+    hResp2D   ->Sumw2();
+
+    std::unique_ptr<TFile> fPure(TFile::Open(recoPureFile,"READ"));
+    auto* hRecoPure = dynamic_cast<TH1D*>(fPure->Get("hRecoPure_t"));
+    hRecoPure->Sumw2();
+    std::unique_ptr<TFile> fout(TFile::Open(outFile,"RECREATE"));
+    hRecoTrain->Write("hRecoTrain");
+    hGenTrain ->Write("hGenTrain");
+    hResp2D   ->Write("hResponse2D");
+    for(int nIter = 1; nIter <= maxIter; ++nIter){
+        auto* hDataMap = dynamic_cast<TH1D*>(hRecoPure->Clone(
+                              Form("hDataMap_iter%d", nIter)));
+        hDataMap->SetTitle(Form("Input data (iter %d)", nIter));
+
+        RooUnfoldResponse response(hRecoTrain, hGenTrain, hResp2D);
+        RooUnfoldBayes    unfold(&response, hDataMap, nIter);
+        auto* hTruth = dynamic_cast<TH1D*>(unfold.Hreco()->Clone(
+                             Form("hTruthRecoPure_iter%d", nIter)));
+        hTruth->SetTitle(Form("Unfolded truth (iter %d)", nIter));
+
+        hDataMap->Write();
+        hTruth  ->Write();
+    }
+
+    fout->Close();
+}
+

@@ -1,0 +1,64 @@
+#include <TFile.h>
+#include <TH1.h>
+#include <iostream>
+#include <memory>
+#include <cmath>
+#include <algorithm>
+
+/*************************************************************************
+ *    - σ(pFake) = √[ (∂(pR·r)/∂pR)²·σ(pR)² + (∂(pR·r)/∂r)²·σ(r)² ]
+ *               = √[ (r·σ(pR))² + (pR·σ(r))² ]
+ *    - σ(pPure) = √[ (∂(pR - pR·r)/∂pR)²·σ(pR)² + (∂(pR - pR·r)/∂r)²·σ(r)² ]
+ *               = √[ ((1−r)·σ(pR))² + (pR·σ(r))² ]
+ *************************************************************************/
+
+void Make_RecoPure_t(
+    const char* recoFile   = "WTA_V1_EnergyBands_ER_8slices_t_normAll.root",
+    const char* recoHist   = "hV1_EnergyBands_probAll",
+    const char* ratioFile  = "WTA_V1_EnergyBands_FAKE_RATIO.root",
+    const char* ratioHist  = "hFakeOverFakePlusMatch",
+    const char* outFile    = "Make_RecoPure_t_normAll.root")
+{
+    auto fReco  = std::unique_ptr<TFile>( TFile::Open(recoFile, "READ") );
+    auto fRatio = std::unique_ptr<TFile>( TFile::Open(ratioFile, "READ") );
+    auto* hRec   = dynamic_cast<TH1*>( fReco->Get(recoHist) );
+    auto* hRatio = dynamic_cast<TH1*>( fRatio->Get(ratioHist) );
+    const int NB = std::min(hRec->GetNbinsX(), hRatio->GetNbinsX());
+    auto* hFake = static_cast<TH1*>(hRec->Clone("hFake_t"));
+    hFake->Reset();
+    hFake->Sumw2();
+    hFake->SetTitle("Fake probability (pRec * ratio)");
+    auto* hPure = static_cast<TH1*>(hRec->Clone("hRecoPure_t"));
+    hPure->Reset();
+    hPure->Sumw2();
+    hPure->SetTitle("Pure probability (pRec - pFake)");
+    for (int i = 1; i <= NB; ++i) {
+        double pR       = hRec->GetBinContent(i);   // pRec
+        double sigma_pR = hRec->GetBinError(i);     // σ(pRec)
+        double r        = hRatio->GetBinContent(i); // ratio
+        double sigma_r  = hRatio->GetBinError(i);   // σ(ratio)
+        if (pR < 0.0 || r < 0.0 || r > 1.0) {
+            hFake->SetBinContent(i, 0.0);
+            hFake->SetBinError  (i, 0.0);
+            hPure->SetBinContent(i, 0.0);
+            hPure->SetBinError  (i, 0.0);
+            continue;
+        }
+
+        double pF     = pR * r;
+        double pPure  = pR - pF;
+	// first order gaussian
+        double sigma_pF    = std::sqrt( (r * sigma_pR) * (r * sigma_pR)
+                                      + (pR * sigma_r) * (pR * sigma_r) );
+        double sigma_pPure = std::sqrt( ((1.0 - r) * sigma_pR) * ((1.0 - r) * sigma_pR)
+                                      + (pR * sigma_r)    * (pR * sigma_r) );
+        hFake->SetBinContent(i, pF);
+        hFake->SetBinError  (i, sigma_pF);
+        hPure->SetBinContent(i, pPure);
+        hPure->SetBinError  (i, sigma_pPure);
+    }
+    auto fout = std::unique_ptr<TFile>( TFile::Open(outFile, "RECREATE") );
+    hFake->Write();
+    hPure->Write();
+    fout->Close();
+}
